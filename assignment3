@@ -1,0 +1,61 @@
+<?php
+session_start();
+
+if (!isset($_SESSION['names'])) {
+    $_SESSION['names'] = [];
+}
+
+if (isset($_POST['add_name']) && !empty(trim($_POST['new_name']))) {
+    $fullName = htmlspecialchars(trim($_POST['new_name']));
+    $nameParts = explode(' ', $fullName);
+
+    $formattedName = '';
+    if (count($nameParts) >= 2) {
+        $lastName = array_pop($nameParts);
+        $firstName = implode(' ', $nameParts);
+        $formattedName = $lastName . ', ' . $firstName;
+    } elseif (count($nameParts) == 1 && !empty($nameParts[0])) {
+        $formattedName = $nameParts[0];
+    }
+
+    if (!empty($formattedName) && !in_array($formattedName, $_SESSION['names'])) {
+        $_SESSION['names'][] = $formattedName;
+    }
+}
+
+if (isset($_POST['clear_names'])) {
+    $_SESSION['names'] = [];
+}
+
+sort($_SESSION['names']);
+
+$names_list = implode("\n", $_SESSION['names']);
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+    <title>Add Names</title>
+</head>
+<body>
+    <div class="container">
+        <h1>Add Names</h1>
+        <form action="" method="POST" class="mb-4">
+            <button type="submit" name="add_name" class="btn btn-primary">Add Name</button>
+            <button type="submit" name="clear_names" class="btn btn-primary">Clear Names</button>
+            <div class="form-group">
+                <label for="nameInput">Enter Name</label>
+                <input type="text" id="nameInput" name="new_name" class="form-control">
+            </div>
+            
+            <div class="form-group">
+                <label for="namesList">List of Names</label>
+                <textarea id="namesList" class="form-control" rows="10" readonly><?php echo htmlspecialchars($names_list); ?></textarea>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
