@@ -1,0 +1,73 @@
+<?php
+class Directories {
+    private $basePath;
+    private $webBase;
+
+    public function __construct() {
+        $this->basePath = realpath(__DIR__ . '/..') . '/directories/';
+        $this->webBase  = 'directories/';
+    }
+    public function createDirectoryAndFile($dirName, $fileContent) {
+        $targetDir = $this->basePath . $dirName;
+        if (is_dir($targetDir)) {
+            return 'A directory already exists with that name.';
+        }
+        if (!mkdir($targetDir, 0777, true)) {
+            return 'File could not be created.';
+        }
+        $filePath = $targetDir . '/readme.txt';
+        if (file_put_contents($filePath, $fileContent) === false) {
+            return 'File could not be created.';
+        }
+        $webPath = $this->webBase . rawurlencode($dirName) . '/readme.txt';
+        return '<a href="' . htmlspecialchars($webPath, ENT_QUOTES) . '" target="_blank">Path were file is located</a>';
+    }
+}
+
+<?php
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+
+require_once __DIR__ . '/classes/Directories.php';
+
+$message = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $dirName = isset($_POST['directoryname']) ? trim($_POST['directoryname']) : '';
+    $content = isset($_POST['filecontent']) ? trim($_POST['filecontent']) : '';
+
+    if ($dirName !== '' && $content !== '') {
+        $directories = new Directories();
+        $message = $directories->createDirectoryAndFile($dirName, $content);
+    }
+}
+
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>File and Directory</title>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+</head>
+<body>
+<div class="container">
+  <h1>File and Directory Assignment</h1>
+  <p>Enter a folder name and the contents of a file. Folder names should contain alpha numeric characters only.</p>
+  <div class="mt-3">
+    <p><?php echo $message; ?></p>
+  </div>
+  <form method="post" action="index.php">
+    <div class="form-group">
+      <label for="directoryname">Folder Name</label>
+      <input type="text" class="form-control" id="directoryname" name="directoryname" required>
+    </div>
+    <div class="form-group">
+      <label for="filecontent">File Content</label>
+      <textarea id="filecontent" name="filecontent" class="form-control" rows="6" required></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Submit</button>
+  </form>
+</div>
+</body>
+</html>
