@@ -1,0 +1,200 @@
+<?php
+class Db_conn {
+    private static $instance = null;
+    private $pdo;
+
+    private function __construct() {
+        $host = 'localhost';
+        $dbname = 'chaumiller';
+        $user = 'chaumiller';
+        $pass = 'fMUbNewPYG8pnci';
+
+        try {
+            $this->pdo = new PDO("mysql:host=$host;dbname=$dbname", $user, $pass);
+            $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        } catch (PDOException $e) {
+            die("Connection failed: " . $e->getMessage());
+        }
+    }
+
+    public static function getInstance() {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+
+    public function connect() {
+        return $this->pdo;
+    }
+}
+
+<?php
+require_once 'Db_conn.php';
+
+class Pdo_methods {
+    private $pdo;
+
+    public function __construct() {
+        $db = Db_conn::getInstance();
+        $this->pdo = $db->connect();
+    }
+
+    public function insert($sql, $params = []) {
+        if ($this->pdo) {
+            $stmt = $this->pdo->prepare($sql);
+            if ($stmt->execute($params)) {
+                return true;
+            } else {
+                error_log("PDO Error: " . json_encode($stmt->errorInfo()));
+            }
+        }
+        return false;
+    }
+
+    public function select($sql, $params = []) {
+        if ($this->pdo) {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+        return [];
+    }
+}
+
+<?php
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+$output = '';
+
+// Only handle POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fileUpload'])) {
+
+    $userFileName = trim($_POST['fileName'] ?? '');
+    if ($userFileName === '') {
+        $output = '<p>You must enter a file name.</p>';
+    } elseif (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+        $output = '<p>File upload failed.</p>';
+    } else {
+        $file = $_FILES['file'];
+        $maxBytes = 100000; // 100 KB limit
+
+        if ($file['size'] > $maxBytes) {
+            $output = '<p>File too large. Max 100 KB.</p>';
+        } else {
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime = $finfo->file($file['tmp_name']);
+
+            if ($mime !== 'application/pdf') {
+                $output = '<p>Invalid file type. Must be PDF.</p>';
+            } else {
+                // Generate a safe unique file name
+                $safeBase = preg_replace('/[^A-Za-z0-9_\-]/', '_', pathinfo($file['name'], PATHINFO_FILENAME));
+                $unique = time() . '_' . bin2hex(random_bytes(6));
+                $serverFileName = $safeBase . '_' . $unique . '.pdf';
+
+                // Use folder relative to this PHP file
+                $targetDir = __DIR__ . '/../files/';
+
+                // Create folder if it doesn't exist
+                if (!is_dir($targetDir)) {
+                    if (!mkdir($targetDir, 0755, true)) {
+                        die('<p>Failed to create upload folder: ' . htmlspecialchars($targetDir) . '</p>');
+                    }
+                }
+
+                // Check folder permissions
+                if (!is_writable($targetDir)) {
+                    die('<p>Upload folder is not writable: ' . htmlspecialchars($targetDir) . '</p>');
+                }
+
+                $targetPath = $targetDir . $serverFileName;
+                $fileUrl = '/cps276/assignments/assignment7/files/' . $serverFileName;
+
+                // Move uploaded file
+                if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+                    $pdo = new Pdo_methods();
+                    $sql = "INSERT INTO files (file_name, file_path) VALUES (?, ?)";
+                    $params = [$userFileName, $fileUrl];
+
+                    if ($pdo->insert($sql, $params)) {
+                        $output = "The file <strong>" . htmlspecialchars($file['name']) . "</strong> has been uploaded and recorded.";
+                    } else {
+                        $output = "Error: File uploaded but could not be saved to the database.";
+                    }
+                } else {
+                    $output = '<p>Error moving uploaded file. Check folder permissions.</p>';
+                }
+            }
+        }
+    }
+}
+
+<?php
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+$output = '';
+$pdo = new Pdo_methods();
+$sql = "SELECT id, file_name, file_path FROM files";
+$files = $pdo->select($sql);
+
+if ($files) {
+    foreach ($files as $file) {
+        $output .= "<li><a target='_blank' href='" . htmlspecialchars($file['file_path']) . "'>" .
+                   htmlspecialchars($file['file_name']) . "</a></li>";
+    }
+} else {
+    $output = "<li>No files found.</li>";
+}
+
+<?php
+require_once 'php/fileUploadProc.php';
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css">
+<title>File Upload</title>
+</head>
+<body>
+<div class="container">
+    <h1>File Upload</h1>
+    <p><a href="listFiles.php">Show File List</a></p>
+    <?php echo $output; ?>
+    <form action="index.php" method="post" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="fileName">File Name</label>
+            <input type="text" class="form-control" id="fileName" name="fileName" required>
+        </div>
+        <div class="form-group">
+            <input type="file" name="file" id="file" accept="application/pdf" required>
+        </div>
+        <button type="submit" name="fileUpload" class="btn btn-primary">Upload File</button>
+    </form>
+</div>
+</body>
+</html>
+
+<?php
+require_once 'php/listFilesProc.php';
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css">
+<title>Uploaded Files</title>
+</head>
+<body>
+<div class="container">
+    <h1>List Files</h1>
+    <a href="index.php">Add list</a>
+    <ul>
+        <?php echo $output; ?>
+    </ul>
+</div>
+</body>
+</html>
