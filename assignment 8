@@ -1,0 +1,298 @@
+<?php
+
+class Date_time {
+    /** @var PDO */
+    private $pdo;
+    public $message = '';
+
+    public function __construct(PDO $pdo) {
+        $this->pdo = $pdo;
+    }
+
+    public function checkSubmit(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
+        if (!isset($_POST['addNote'])) return;
+
+        $dateTime = trim($_POST['dateTime'] ?? '');
+        $note = trim($_POST['note'] ?? '');
+
+        if ($dateTime === '') {
+            $this->message = 'Error: date/time empty.';
+            return;
+        }
+        if ($note === '') {
+            $this->message = 'Error: note empty.';
+            return;
+        }
+
+        $timestamp = strtotime($dateTime);
+        if ($timestamp === false) {
+            $this->message = 'Error: invalid date/time format: ' . htmlspecialchars($dateTime, ENT_QUOTES);
+            return;
+        }
+
+        try {
+            $sql = "INSERT INTO notes (date_time, note) VALUES (:dt, :note)";
+            $stmt = $this->pdo->prepare($sql);
+            $ok = $stmt->execute([':dt' => $timestamp, ':note' => $note]);
+
+            if ($ok) {
+                $this->message = 'Note has been added.';
+            } else {
+                $this->message = 'Insert failed. DB error: ' . implode(' | ', $stmt->errorInfo());
+            }
+        } catch (PDOException $e) {
+            $this->message = 'PDOException: ' . $e->getMessage();
+        }
+    }
+
+    public function getNotesBetween(): string {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['getNotes'])) {
+            try {
+                $rows = $this->pdo->query("SELECT date_time, note FROM notes ORDER BY date_time DESC")->fetchAll();
+            } catch (PDOException $e) {
+                return '<p>PDOException: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES) . '</p>';
+            }
+
+            if (!$rows) {
+                return '<p>No notes in DB.</p>';
+            }
+
+            $html = '<table border="1" cellpadding="6"><thead><tr><th>Date and Time</th><th>Note</th></tr></thead><tbody>';
+            foreach ($rows as $r) {
+                $dt = (int)$r['date_time'];
+                $html .= '<tr><td>' . date('m/d/Y h:i A', $dt) . '</td><td>' . htmlspecialchars($r['note'], ENT_QUOTES | ENT_SUBSTITUTE) . '</td></tr>';
+            }
+            $html .= '</tbody></table>';
+            return $html;
+        }
+
+        $beg = trim($_POST['begDate'] ?? '');
+        $end = trim($_POST['endDate'] ?? '');
+
+        if ($beg === '' || $end === '') {
+            return '<p>Error: both beginning and ending dates required.</p>';
+        }
+
+        $begTimestamp = strtotime($beg . ' 00:00:00');
+        $endTimestamp = strtotime($end . ' 23:59:59');
+
+        if ($begTimestamp === false || $endTimestamp === false) {
+            return '<p>Error: invalid date conversion.</p>';
+        }
+
+        if ($begTimestamp > $endTimestamp) {
+            return '<p>Error: beginning date is after ending date.</p>';
+        }
+
+        $sql = "SELECT date_time, note FROM notes WHERE date_time BETWEEN :beg AND :end ORDER BY date_time DESC";
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([':beg' => $begTimestamp, ':end' => $endTimestamp]);
+            $rows = $stmt->fetchAll();
+        } catch (PDOException $e) {
+            return '<p>PDOException: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES) . '</p>';
+        }
+
+        if (!$rows) {
+            return '<p>No notes found in that range.</p>';
+        }
+
+        $html = '<table border="1" cellpadding="6"><thead><tr><th>Date and Time</th><th>Note</th></tr></thead><tbody>';
+        foreach ($rows as $r) {
+            $dt = (int)$r['date_time'];
+            $html .= '<tr><td>' . date('m/d/Y h:i A', $dt) . '</td><td>' . htmlspecialchars($r['note'], ENT_QUOTES | ENT_SUBSTITUTE) . '</td></tr>';
+        }
+        $html .= '</tbody></table>';
+        return $html;
+    }
+}
+
+<?php
+
+class Db_conn {
+    private static $pdo = null;
+
+    public static function getConnection(): PDO {
+        if (self::$pdo === null) {
+            $host = 'localhost';
+            $dbname = 'chaumiller';
+            $user = 'chaumiller';
+            $pass = 'password';
+            $charset = 'utf8mb4';
+
+            $dsn = "mysql:host=$host;dbname=$dbname;charset=$charset";
+            $options = [
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false,
+            ];
+            self::$pdo = new PDO($dsn, $user, $pass, $options);
+        }
+        return self::$pdo;
+    }
+}
+
+<?php
+
+require_once __DIR__ . '/classes/Db_conn.php';
+require_once __DIR__ . '/classes/Date_time.php';
+
+$pdo = Db_conn::getConnection();
+$dt = new Date_time($pdo);
+$resultHtml = $dt->getNotesBetween();
+?>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Display Notes</title>
+</head>
+<body>
+  <h2>Display Notes</h2>
+
+  <form method="post" action="">
+    <label for="begDate">Beginning Date</label><br>
+    <input type="date" id="begDate" name="begDate"><br><br>
+
+    <label for="endDate">Ending Date</label><br>
+    <input type="date" id="endDate" name="endDate"><br><br>
+
+    <button type="submit" name="getNotes">Get Notes</button>
+  </form>
+
+  <hr>
+
+  <div id="results">
+    <?php echo $resultHtml; ?>
+  </div>
+
+  <p><a href="index.php">Add Note</a></p>
+</body>
+</html>
+
+<?php
+require_once __DIR__ . '/classes/Db_conn.php';
+require_once __DIR__ . '/classes/Date_time.php';
+
+$pdo = Db_conn::getConnection();
+$dt = new Date_time($pdo);
+$dt->checkSubmit();
+
+$oldDateTime = htmlspecialchars($_POST['dateTime'] ?? '', ENT_QUOTES);
+$oldNote = htmlspecialchars($_POST['note'] ?? '', ENT_QUOTES);
+?>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Add Note</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+      textarea { min-height: 400px; }
+    </style>
+  </head>
+  <body>
+    <div class="container py-4">
+      <h1>Add Note</h1>
+      <p><a href="display_notes.php">Display Notes</a></p>
+
+      <?php if (!empty($dt->message)): ?>
+        <div class="alert alert-info"><?php echo htmlspecialchars($dt->message, ENT_QUOTES); ?></div>
+      <?php endif; ?>
+
+      <form action="index.php" method="post">
+        <div class="form-group">
+          <label for="dateTime">Date and Time</label>
+          <input type="datetime-local" class="form-control" id="dateTime" name="dateTime" value="<?php echo $oldDateTime; ?>">
+        </div>
+
+        <div class="form-group">
+          <label for="note">Note</label>
+          <textarea id="note" name="note" class="form-control"><?php echo $oldNote; ?></textarea>
+        </div>
+
+        <div class="form-group">
+          <input type="submit" name="addNote" class="btn btn-primary" value="Add Note">
+        </div>
+      </form>
+    </div>
+  </body>
+</html>
+
+<?php
+require_once __DIR__ . '/classes/Db_conn.php';
+require_once __DIR__ . '/classes/Date_time.php';
+
+$pdo = Db_conn::getConnection();
+$dt = new Date_time($pdo);
+
+$resultHtml = '';
+$isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
+$beg = trim($_POST['begDate'] ?? '');
+$end = trim($_POST['endDate'] ?? '');
+
+if ($isPost && isset($_POST['getNotes'])) {
+    // If user clicked Get Notes, get notes between dates or all if blank
+    if ($beg === '' && $end === '') {
+        // Show all notes when no date range is provided
+        try {
+            $rows = $pdo->query("SELECT date_time, note FROM notes ORDER BY date_time DESC")->fetchAll();
+        } catch (PDOException $e) {
+            $resultHtml = '<div class="alert alert-danger">DB error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES) . '</div>';
+            $rows = [];
+        }
+
+        if ($rows) {
+            $resultHtml  = '<p>Showing all notes:</p>';
+            $resultHtml .= '<table class="table table-bordered"><thead><tr><th>Date and Time</th><th>Note</th></tr></thead><tbody>';
+            foreach ($rows as $r) {
+                $dtInt = (int)$r['date_time'];
+                $resultHtml .= '<tr><td>' . date('m/d/Y h:i A', $dtInt) . '</td><td>' . htmlspecialchars($r['note'], ENT_QUOTES|ENT_SUBSTITUTE) . '</td></tr>';
+            }
+            $resultHtml .= '</tbody></table>';
+        } else {
+            $resultHtml = '<p>No notes in the database.</p>';
+        }
+    } else {
+        // If dates provided, use the class method for filtering
+        $resultHtml = $dt->getNotesBetween();
+    }
+}
+?>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Display Notes</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  </head>
+  <body class="container py-4">
+    <h1>Display Notes</h1>
+    <p><a href="index.php">Add Note</a></p>
+
+    <form action="display_notes.php" method="post" class="mb-4">
+      <div class="form-group">
+        <label for="begDate">Beginning Date</label>
+        <input type="date" class="form-control" id="begDate" name="begDate" value="<?php echo htmlspecialchars($beg); ?>">
+      </div>
+
+      <div class="form-group">
+        <label for="endDate">Ending Date</label>
+        <input type="date" class="form-control" id="endDate" name="endDate" value="<?php echo htmlspecialchars($end); ?>">
+      </div>
+
+      <div class="form-group">
+        <input type="submit" name="getNotes" class="btn btn-primary" value="Get Notes">
+      </div>
+    </form>
+
+    <?php if ($isPost): ?>
+      <div id="results">
+        <?php echo $resultHtml; ?>
+      </div>
+    <?php endif; ?>
+  </body>
+</html>
