@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Add Display and Delete Names</title>
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+    <style>
+      #msg {
+        margin: 10px 0 0 0;
+      }
+    </style>
+  </head>
+  <body>
+      <div class="container">
+        <h1>Add Display and Delete Names</h1>
+        
+        <input type="button" id="addName" class="btn btn-primary" value="Add Name">
+        <input type="button" id="clearNames" class="btn btn-primary" value="Clear Names">
+        <p id="msg"></p>
+        <div class="form-group">
+          <label for="flname">First and Last Name</label>
+          <input type="text" class="form-control" id="flname">
+        </div>
+        <h2>Name List:</h2>
+        <div id="displayNames"></div>
+
+    </div>
+
+    <script src="js/main.js"></script>
+     
+  </body>
+</html>
+
+"use strict";
+
+let names = {};
+
+names.init = function(){
+	document.getElementById('addName').addEventListener('click', names.addName);
+	document.getElementById('clearNames').addEventListener('click', names.clearNames);
+	names.displayNames();
+};
+
+
+
+names.clearNames = function(){
+	document.getElementById('msg').innerHTML = "";
+	fetch('php/clearNames.php')
+		//.then(response => response.json())
+		.then(response => {
+			// Log the raw text response to the console good for debugging
+			response.clone().text().then(rawText => {
+				console.log('Raw Text Response:', rawText);
+			});
+
+			// Parse and return the JSON response
+			return response.json();
+		}) 
+		.then(json => {
+			console.log(json);
+			if(json.masterstatus === 'error'){
+				document.getElementById('msg').innerHTML = json.msg;
+				names.displayNames();
+			} else {
+				document.getElementById('msg').innerHTML = json.msg;
+				document.getElementById('flname').value = "";
+				//document.getElementById('displayNames').innerHTML = "";
+				names.displayNames();
+
+			}
+		})
+		.catch(error => console.error('Error:', error));
+};
+
+names.addName = function(){
+	let data = {};
+	document.getElementById('displayNames').innerHTML = "";
+	document.getElementById('msg').innerHTML = "";
+	if(document.getElementById('flname').value === ""){
+		document.getElementById('msg').innerHTML = "You must enter a name";
+		return;
+	}
+
+	data.name = document.getElementById('flname').value;
+	data = JSON.stringify(data);
+
+	fetch('php/addName.php', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: data
+	})
+	//.then(response => response.json())
+	.then(response => {
+		// Log the raw text response to the console good for debugging
+		response.clone().text().then(rawText => {
+			console.log('Raw Text Response:', rawText);
+		});
+
+		// Parse and return the JSON response
+		return response.json();
+	}) 
+	.then(json => {
+		console.log(json);
+		if(json.masterstatus === 'error'){
+			document.getElementById('msg').innerHTML = json.msg;
+			names.displayNames();
+		} else {
+			document.getElementById('msg').innerHTML = json.msg;
+			document.getElementById('flname').value = "";
+			names.displayNames();
+		}
+	})
+	.catch(error => console.error('Error:', error));
+};
+
+names.displayNames = function(){
+	document.getElementById('msg').innerHTML = "";
+	fetch('php/displayNames.php')
+		//.then(response => response.json())
+		.then(response => {
+			// Log the raw text response to the console good for debugging
+			response.clone().text().then(rawText => {
+				console.log('Raw Text Response:', rawText);
+			});
+
+			// Parse and return the JSON response
+			return response.json();
+		}) 
+		.then(json => {
+			console.log(json);
+			if(json.masterstatus === 'error'){
+				document.getElementById('msg').innerHTML = json.msg;
+			} else {
+				document.getElementById('displayNames').innerHTML = json.names;
+				document.getElementById('flname').value = "";
+			}
+		})
+		.catch(error => console.error('Error:', error));
+};
+
+names.init();
+
+<?php
+
+class DatabaseConn {	
+
+  private $conn;
+  /* THIS CLASS CONNECTS TO THE DATABASE ONLY AND SETS UP THE ATTRIBUTE PARAMETERS */
+  public function dbOpen(){
+
+    try {
+
+      $dbHost = 'localhost';
+      $dbName = 'chaumiller';
+      $dbUsr = 'chaumiller';
+      $dbPass = 'password';
+
+      $this->conn = new PDO('mysql:host=' . $dbHost . ';dbname=' . $dbName, $dbUsr, $dbPass);
+      $this->conn->setAttribute(PDO::ATTR_EMULATE_PREPARES, false); /*THIS STOPS PDO FROM ADDING SINGLE QUOTES AROUND INTEGER VALUES.*/
+      $this->conn->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);/* FORCES QUERIES TO BE BUFFERED IN MYSQL */
+      $this->conn->setAttribute(PDO::ATTR_AUTOCOMMIT, true);
+      $this->conn->setAttribute(PDO::MYSQL_ATTR_LOCAL_INFILE, true);
+      $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+      return $this->conn;
+
+    }
+      
+    catch(PDOException $e) { 
+
+      echo $e->getMessage(); 
+
+    }
+
+  }
+}
+
+<?php
+/* THIS CLASS EXTENDS THE DATABASE CONNECTION CLASS AND BUILD ON IT WITH PDO COMMANDS */
+/* THE DATABASE CONNECTION CLASS IS STORED OUTSIDE OF THE EXAMPLE FILES SO YOU CANNOT SEE THE CONNECTION INFORMATION. ALSO IT IS MORE SECURE*/
+require_once "Db_conn.php";
+class PdoMethods extends DatabaseConn {
+
+	
+	private $sth;
+	private $conn;
+	private $db;
+	private $error;
+
+
+	/* THIS METHOD IS FOR ALL SELECT STATEMENTS THAT NEED TO HAVE A BINDING TO PROETECT THE DATA.  THE SCRIPT TAKES THE SQL STATEMENTS AN THE BINDING ARRAY AS ITS PARAMETERS AND PERFORMS THE QUERY.  IT WILL RUN THE QUERY AND RETURN THE RESULT AS AN ASSOCIATIVE ARRAY OR AN ERROR STRING.*/
+	public function selectBinded($sql, $bindings){
+		$this->error = false;
+
+		//I CREATE A TRY CATCH BLOCK TO CATCH ANY ERRORS THAT MIGHT ARRISE AND RETURNS AN ERROR MESSAGE.
+
+		/*IMPORTANT!!! IF YOU WANT THE FATAL ERROR TO DISPLAY ON THE WEBPAGE AND NOT THE ERROR MESSAGE THEN COMMENT OUT THE TRY CATCH PART AND JUST RUN THE STATEMENTS WITHIN THE TRY*/
+		try{
+			$this->db_connection();
+			$this->sth = $this->conn->prepare($sql);
+			$this->createBinding($bindings);
+			$this->sth->execute();
+		}
+		catch(PDOException $e){
+			
+			//THIS WILL OUTPUT THE ERROR MESSAGE TO THE BROWSER REMOVE IF IN PRODUCTION
+			echo $e->getMessage();
+			return 'error';
+			
+		}
+		
+		//THIS CLOSES THE DATABASE CONNECTION
+		$this->conn = null;
+		
+		//THIS RETURNS A RECORD SET
+		return $this->sth->fetchAll(PDO::FETCH_ASSOC);
+			
+	}
+
+	/* THIS FUNCTION DOES THE SAME AS THE ABOVE BUT DOES NOT NEED ANY BINDED PARAMETERS ARE NO PARAMTERS ARE PASSED */
+	public function selectNotBinded($sql){
+			$this->error = false;
+			
+			//I CREATE A TRY CATCH BLOCK TO CATCH ANY ERRORS THAT MIGHT ARRISE AND RETURNS AN ERROR MESSAGE.
+
+			/*IMPORTANT!!! IF YOU WANT THE FATAL ERROR TO DISPLAY ON THE WEBPAGE AND NOT THE ERROR MESSAGE THEN COMMENT OUT THE TRY CATCH PART AND JUST RUN THE STATEMENTS WITHIN THE TRY*/
+			try{
+				$this->db_connection();
+				$this->sth = $this->conn->prepare($sql);
+				$this->sth->execute();
+			}
+			catch (PDOException $e){
+				//THIS WILL OUTPUT THE ERROR MESSAGE TO THE BROWSER REMOVE IF IN PRODUCTION
+				echo $e->getMessage();
+				return 'error';
+			}
+			
+			//THIS CLOSES THE DATABASE CONNECTION
+			$this->conn = null;
+			
+			//THIS RETURNS THE RECORD SET AS AN ARRAY
+			return $this->sth->fetchAll(PDO::FETCH_ASSOC);
+
+		}
+
+	/* BECAUSE ONLY SELECT QUERIES RETURN A VALUE THE DOES ALL THE REST CREATE, UPDATE, DELETE */
+	public function otherBinded($sql, $bindings){
+		$this->error = false;
+		
+		//I CREATE A TRY CATCH BLOCK TO CATCH ANY ERRORS THAT MIGHT ARRISE AND RETURNS AN ERROR MESSAGE.
+		
+		/*IMPORTANT!!! IF YOU WANT THE FATAL ERROR TO DISPLAY ON THE WEBPAGE AND NOT THE ERROR MESSAGE THEN COMMENT OUT THE TRY CATCH PART AND JUST RUN THE STATEMENTS WITHIN THE TRY*/
+		try{
+			$this->db_connection();
+			$this->sth = $this->conn->prepare($sql);
+			$this->createBinding($bindings);
+			$this->sth->execute();
+		}
+		catch(PDOException $e) {
+			//THIS WILL OUTPUT THE ERROR MESSAGE TO THE BROWSER REMOVE IF IN PRODUCTION
+			echo $e->getMessage();
+			return 'error';
+		}
+
+		//THIS CLOSES THE DATABASE CONNECTION
+		$this->conn = null;
+
+		//NO ERROR MEANS EVERYTHING WORKED
+		return 'noerror';
+	}
+
+	public function otherNotBinded($sql){
+		$this->error = false;
+			
+			//I CREATE A TRY CATCH BLOCK TO CATCH ANY ERRORS THAT MIGHT ARRISE AND RETURNS AN ERROR MESSAGE.
+
+			/*IMPORTANT!!! IF YOU WANT THE FATAL ERROR TO DISPLAY ON THE WEBPAGE AND NOT THE ERROR MESSAGE THEN COMMENT OUT THE TRY CATCH PART AND JUST RUN THE STATEMENTS WITHIN THE TRY*/
+			try{
+				$this->db_connection();
+				$this->sth = $this->conn->prepare($sql);
+				$this->sth->execute();
+			}
+			catch (PDOException $e){
+				//THIS WILL OUTPUT THE ERROR MESSAGE TO THE BROWSER REMOVE IF IN PRODUCTION
+				echo $e->getMessage();
+				return 'error';
+			}
+			
+			//THIS CLOSES THE DATABASE CONNECTION
+			$this->conn = null;
+			
+			//THIS RETURNS NOERROR IF NO ERRORS
+			return 'noerror';
+
+	}
+
+	/* CREATES A CONNECTION TO THE DATABASE */
+	private function db_connection(){
+		$this->db = new DatabaseConn();
+		$this->conn = $this->db->dbOpen();
+	}
+
+	/* CREATES THE BINDINGS */
+	private function createBinding($bindings){
+		foreach($bindings as $value){
+			switch($value[2]){
+				case "str" : $this->sth->bindParam($value[0],$value[1], PDO::PARAM_STR);
+				case "int" : $this->sth->bindParam($value[0],$value[1], PDO::PARAM_INT);
+			}
+		}
+	}
+}
+
+<?php
+require_once __DIR__ . '/../classes/Db_conn.php';
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+$raw = file_get_contents('php://input');
+$data = json_decode($raw, true);
+
+if (!isset($data['name']) || trim($data['name']) === '') {
+    echo json_encode(['masterstatus' => 'error', 'msg' => 'No name provided']);
+    exit;
+}
+
+$inputName = trim($data['name']);
+
+$parts = preg_split('/\s+/', $inputName);
+if (count($parts) < 2) {
+    echo json_encode(['masterstatus' => 'error', 'msg' => 'Please enter first and last name separated by a space']);
+    exit;
+}
+
+$first = array_shift($parts);
+$last  = array_pop($parts);
+if (!empty($parts)) {
+    $first .= ' ' . implode(' ', $parts);
+}
+
+$stored = $last . ',' . $first;
+
+$pdoHelper = new PdoMethods();
+$sql = "INSERT INTO names (name) VALUES (:name)";
+$bindings = [
+    [':name', $stored, 'str']
+];
+
+$result = $pdoHelper->otherBinded($sql, $bindings);
+
+if ($result === 'noerror') {
+    echo json_encode(['masterstatus' => 'success', 'msg' => "Added: {$stored}"]);
+} else {
+    echo json_encode(['masterstatus' => 'error', 'msg' => 'Database insert failed']);
+}
+
+<?php
+require_once __DIR__ . '/../classes/Db_conn.php';
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+$pdoHelper = new PdoMethods();
+$sql = "TRUNCATE TABLE names";
+$result = $pdoHelper->otherNotBinded($sql);
+
+if ($result === 'noerror') {
+    echo json_encode(['masterstatus' => 'success', 'msg' => 'All names cleared', 'names' => '']);
+} else {
+    echo json_encode(['masterstatus' => 'error', 'msg' => 'Failed to clear names', 'names' => '']);
+}
+
+<?php
+require_once __DIR__ . '/../classes/Db_conn.php';
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+$pdoHelper = new PdoMethods();
+$sql = "SELECT name FROM names ORDER BY name ASC";
+$rows = $pdoHelper->selectNotBinded($sql);
+
+if ($rows === 'error') {
+    echo json_encode([
+        'masterstatus' => 'error',
+        'msg' => 'Database query failed',
+        'names' => ''
+    ]);
+    exit;
+}
+
+if (empty($rows)) {
+    echo json_encode([
+        'masterstatus' => 'success',
+        'msg' => '',
+        'names' => '<div>No names to display</div>'
+    ]);
+    exit;
+}
+
+$html = '';
+
+foreach ($rows as $r) {
+    $name = isset($r['name']) ? $r['name'] : '';
+
+    $displayName = str_replace(',', ', ', $name);
+
+    $html .= '<div style="margin-bottom: 15px;">' .
+                htmlspecialchars($displayName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
+             '</div>';
+}
+
+echo json_encode([
+    'masterstatus' => 'success',
+    'msg' => 'Names loaded',
+    'names' => $html
+]);
