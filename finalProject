@@ -1,0 +1,1381 @@
+<?php
+class Db_conn {
+    private $host = 'localhost';
+    private $db = 'chaumiller';
+    private $user = 'chaumiller';
+    private $pass = 'password';
+    public $pdo;
+
+    public function __construct() {
+        $dsn = "mysql:host={$this->host};dbname={$this->db}";
+        $opt = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ];
+        $this->pdo = new PDO($dsn, $this->user, $this->pass, $opt);
+    }
+
+    public function dbOpen() {
+        return $this->pdo;
+    }
+}
+
+<?php
+require_once "Db_conn.php";
+
+class PdoMethods extends Db_conn {
+
+    private $sth;
+    private $conn;
+    private $db;
+    private $error;
+
+    public function selectBinded($sql, $bindings){
+        try{
+            $this->db_connection();
+            $this->sth = $this->conn->prepare($sql);
+            $this->createBinding($bindings);
+            $this->sth->execute();
+        }
+        catch(PDOException $e){
+            echo $e->getMessage();
+            return 'error';
+        }
+
+        $this->conn = null;
+        return $this->sth->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function selectNotBinded($sql){
+        try{
+            $this->db_connection();
+            $this->sth = $this->conn->prepare($sql);
+            $this->sth->execute();
+        }
+        catch(PDOException $e){
+            echo $e->getMessage();
+            return 'error';
+        }
+
+        $this->conn = null;
+        return $this->sth->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function otherBinded($sql, $bindings){
+        try{
+            $this->db_connection();
+            $this->sth = $this->conn->prepare($sql);
+            $this->createBinding($bindings);
+            $this->sth->execute();
+        }
+        catch(PDOException $e){
+            echo $e->getMessage();
+            return 'error';
+        }
+
+        $this->conn = null;
+        return 'noerror';
+    }
+
+    public function otherNotBinded($sql){
+        try{
+            $this->db_connection();
+            $this->sth = $this->conn->prepare($sql);
+            $this->sth->execute();
+        }
+        catch(PDOException $e){
+            echo $e->getMessage();
+            return 'error';
+        }
+
+        $this->conn = null;
+        return 'noerror';
+    }
+
+    private function db_connection(){
+        $this->db = new Db_conn();
+        $this->conn = $this->db->dbOpen();
+    }
+
+    private function createBinding($bindings){
+        foreach($bindings as $value){
+            switch($value[2]){
+                case "str": $this->sth->bindParam($value[0], $value[1], PDO::PARAM_STR); break;
+                case "int": $this->sth->bindParam($value[0], $value[1], PDO::PARAM_INT); break;
+            }
+        }
+    }
+}
+
+<?php
+require_once __DIR__ . '/Validation.php';
+
+class StickyForm extends Validation {
+
+    public function validateForm($data, $formConfig) {
+        foreach ($formConfig as $key => &$element) {
+            $element['value'] = $data[$key] ?? '';
+            $customErrorMsg = $element['errorMsg'] ?? null;
+
+            if (isset($element['type']) && in_array($element['type'], ['text', 'textarea']) && isset($element['regex'])) {
+                if (!empty($element['required']) && trim($element['value']) === '') {
+                    $element['error'] = $customErrorMsg ?? 'This field is required.';
+                    $formConfig['masterStatus']['error'] = true;
+                } elseif (empty($element['required']) && trim($element['value']) === '') {
+                    // optional empty - skip
+                } else {
+                    $isValid = $this->checkFormat($element['value'], $element['regex'], $customErrorMsg);
+                    if (!$isValid) {
+                        $errors = $this->getErrors();
+                        $element['error'] = $errors[$element['regex']] ?? ($customErrorMsg ?? 'Invalid format.');
+                    }
+                }
+            }
+            elseif (isset($element['type']) && $element['type'] === 'select') {
+                $element['selected'] = $data[$key] ?? '';
+                if (!empty($element['required']) && ($element['selected'] === '0' || trim($element['selected']) === '')) {
+                    $element['error'] = $customErrorMsg ?? 'This field is required.';
+                    $formConfig['masterStatus']['error'] = true;
+                }
+            }
+            elseif (isset($element['type']) && $element['type'] === 'checkbox') {
+                if (isset($element['options'])) {
+                    $anyChecked = false;
+                    foreach ($element['options'] as &$option) {
+                        $option['checked'] = in_array($option['value'], $data[$key] ?? []);
+                        if ($option['checked']) $anyChecked = true;
+                    }
+                    if (!empty($element['required']) && !$anyChecked) {
+                        $element['error'] = $customErrorMsg ?? 'This field is required.';
+                        $formConfig['masterStatus']['error'] = true;
+                    }
+                } else {
+                    $element['checked'] = isset($data[$key]);
+                    if (!empty($element['required']) && !$element['checked']) {
+                        $element['error'] = $customErrorMsg ?? 'This field is required.';
+                        $formConfig['masterStatus']['error'] = true;
+                    }
+                }
+            }
+            elseif (isset($element['type']) && $element['type'] === 'radio') {
+                $isChecked = false;
+                foreach ($element['options'] as &$option) {
+                    $option['checked'] = ($option['value'] === ($data[$key] ?? ''));
+                    if ($option['checked']) $isChecked = true;
+                }
+                if (!empty($element['required']) && !$isChecked) {
+                    $element['error'] = $customErrorMsg ?? 'This field is required.';
+                    $formConfig['masterStatus']['error'] = true;
+                }
+            }
+        }
+
+        return $formConfig;
+    }
+
+    public function createOptions($options, $selectedValue) {
+        $html = '';
+        foreach ($options as $value => $label) {
+            $selected = ($value == $selectedValue) ? 'selected' : '';
+            $escapedValue = htmlspecialchars((string)$value, ENT_QUOTES);
+            $escapedLabel = htmlspecialchars((string)$label, ENT_QUOTES);
+            $html .= "<option value=\"{$escapedValue}\" {$selected}>{$escapedLabel}</option>";
+        }
+        return $html;
+    }
+
+    private function renderError($element) {
+        return !empty($element['error']) ? "<span class=\"text-danger\">".htmlspecialchars($element['error'], ENT_QUOTES)."</span><br>" : '';
+    }
+
+    public function renderInput($element, $class = '') {
+        $errorOutput = $this->renderError($element);
+        $label = htmlspecialchars($element['label'] ?? '', ENT_QUOTES);
+        $id = htmlspecialchars($element['id'] ?? $element['name'] ?? '', ENT_QUOTES);
+        $name = htmlspecialchars($element['name'] ?? '', ENT_QUOTES);
+        $value = htmlspecialchars($element['value'] ?? '', ENT_QUOTES);
+
+        return <<<HTML
+<div class="{$class}">
+    <label for="{$id}">{$label}</label>
+    <input type="text" class="form-control" id="{$id}" name="{$name}" value="{$value}">
+    {$errorOutput}
+</div>
+HTML;
+    }
+
+    public function renderPassword($element, $class = '') {
+        $errorOutput = $this->renderError($element);
+        $label = htmlspecialchars($element['label'] ?? '', ENT_QUOTES);
+        $id = htmlspecialchars($element['id'] ?? $element['name'] ?? '', ENT_QUOTES);
+        $name = htmlspecialchars($element['name'] ?? '', ENT_QUOTES);
+
+        return <<<HTML
+<div class="{$class}">
+    <label for="{$id}">{$label}</label>
+    <input type="password" class="form-control" id="{$id}" name="{$name}">
+    {$errorOutput}
+</div>
+HTML;
+    }
+
+    public function renderTextarea($element, $class = '') {
+        $errorOutput = $this->renderError($element);
+        $label = htmlspecialchars($element['label'] ?? '', ENT_QUOTES);
+        $id = htmlspecialchars($element['id'] ?? $element['name'] ?? '', ENT_QUOTES);
+        $name = htmlspecialchars($element['name'] ?? '', ENT_QUOTES);
+        $value = htmlspecialchars($element['value'] ?? '', ENT_QUOTES);
+
+        return <<<HTML
+<div class="{$class}">
+    <label for="{$id}">{$label}</label>
+    <textarea class="form-control" id="{$id}" name="{$name}">{$value}</textarea>
+    {$errorOutput}
+</div>
+HTML;
+    }
+
+    public function renderRadio($element, $class = '', $layout = 'vertical') {
+        $errorOutput = $this->renderError($element);
+        $optionsHtml = '';
+        $layoutClass = $layout === 'horizontal' ? 'form-check-inline' : '';
+        $label = htmlspecialchars($element['label'] ?? '', ENT_QUOTES);
+        $idBase = htmlspecialchars($element['id'] ?? $element['name'] ?? '', ENT_QUOTES);
+        $name = htmlspecialchars($element['name'] ?? '', ENT_QUOTES);
+
+        foreach ($element['options'] as $option) {
+            $checked = !empty($option['checked']) ? 'checked' : '';
+            $optId = $idBase . '_' . htmlspecialchars((string)$option['value'], ENT_QUOTES);
+            $optValue = htmlspecialchars((string)$option['value'], ENT_QUOTES);
+            $optLabel = htmlspecialchars($option['label'], ENT_QUOTES);
+            $optionsHtml .= <<<HTML
+<div class="form-check {$layoutClass}">
+    <input class="form-check-input" type="radio" id="{$optId}" name="{$name}" value="{$optValue}" {$checked}>
+    <label class="form-check-label" for="{$optId}">{$optLabel}</label>
+</div>
+HTML;
+        }
+        return <<<HTML
+<div class="{$class}">
+    <label>{$label}</label><br>
+    {$optionsHtml}
+    {$errorOutput}
+</div>
+HTML;
+    }
+
+    public function renderCheckbox($element, $class = '', $layout = 'vertical') {
+        $checked = !empty($element['checked']) ? 'checked' : '';
+        $errorOutput = $this->renderError($element);
+        $layoutClass = $layout === 'horizontal' ? 'form-check-inline' : '';
+        $label = htmlspecialchars($element['label'] ?? '', ENT_QUOTES);
+        $id = htmlspecialchars($element['id'] ?? $element['name'] ?? '', ENT_QUOTES);
+        $name = htmlspecialchars($element['name'] ?? '', ENT_QUOTES);
+
+        return <<<HTML
+<div class="{$class}">
+    <div class="form-check {$layoutClass}">
+        <input class="form-check-input" type="checkbox" id="{$id}" name="{$name}" {$checked}>
+        <label class="form-check-label" for="{$id}">{$label}</label>
+    </div>
+    {$errorOutput}
+</div>
+HTML;
+    }
+
+    public function renderCheckboxGroup($element, $class = '', $layout = 'vertical') {
+        $errorOutput = $this->renderError($element);
+        $optionsHtml = '';
+        $layoutClass = $layout === 'horizontal' ? 'form-check-inline' : '';
+        $label = htmlspecialchars($element['label'] ?? '', ENT_QUOTES);
+        $idBase = htmlspecialchars($element['id'] ?? $element['name'] ?? '', ENT_QUOTES);
+        $name = htmlspecialchars($element['name'] ?? '', ENT_QUOTES);
+
+        foreach ($element['options'] as $index => $option) {
+            $checked = !empty($option['checked']) ? 'checked' : '';
+            $optId = $idBase . '_' . $index;
+            $optValue = htmlspecialchars((string)$option['value'], ENT_QUOTES);
+            $optLabel = htmlspecialchars($option['label'], ENT_QUOTES);
+            $optionsHtml .= <<<HTML
+<div class="form-check {$layoutClass}">
+    <input class="form-check-input" type="checkbox" id="{$optId}" name="{$name}[]" value="{$optValue}" {$checked}>
+    <label class="form-check-label" for="{$optId}">{$optLabel}</label>
+</div>
+HTML;
+        }
+        return <<<HTML
+<div class="{$class}">
+    <label>{$label}</label><br>
+    {$optionsHtml}
+    {$errorOutput}
+</div>
+HTML;
+    }
+
+    public function renderSelect($element, $class = '') {
+        $errorOutput = $this->renderError($element);
+        $optionsHtml = $this->createOptions($element['options'], $element['selected'] ?? '');
+        $label = htmlspecialchars($element['label'] ?? '', ENT_QUOTES);
+        $id = htmlspecialchars($element['id'] ?? $element['name'] ?? '', ENT_QUOTES);
+        $name = htmlspecialchars($element['name'] ?? '', ENT_QUOTES);
+
+        return <<<HTML
+<div class="{$class}">
+    <label for="{$id}">{$label}</label>
+    <select class="form-control" id="{$id}" name="{$name}">
+        {$optionsHtml}
+    </select>
+    {$errorOutput}
+</div>
+HTML;
+    }
+}
+?>
+
+<?php
+class Validation {
+    private $errors = [];
+
+    public function checkFormat($value, $type, $customErrorMsg = null) {
+        $patterns = [
+            'name'    => '/^[a-z\'\s-]{1,50}$/i',
+            'phone'   => '/^\d{3}\.\d{3}\.\d{4}$/',
+            'address' => '/^[a-zA-Z0-9\s,.\'-]{1,100}$/',
+            'zip'     => '/^\d{5}(-\d{4})?$/',
+            'email'   => '/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/',
+            'none'    => '/.*/'
+        ];
+
+        $pattern = $patterns[$type] ?? '/.*/';
+
+        if (!preg_match($pattern, $value)) {
+            $errorMessage = $customErrorMsg ?? "Invalid $type format.";
+            $this->errors[$type] = $errorMessage;
+            return false;
+        }
+
+        return true;
+    }
+
+    public function getErrors() {
+        return $this->errors;
+    }
+
+    public function hasErrors() {
+        return !empty($this->errors);
+    }
+}
+?>
+
+<?php
+session_start();
+if (!isset($_SESSION['user'])) {
+    header('Location: ../index.php?page=login');
+    exit;
+}
+
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+require_once __DIR__ . '/../classes/Validation.php';
+
+$fname    = trim($_POST['fname'] ?? '');
+$lname    = trim($_POST['lname'] ?? '');
+$email    = trim($_POST['email'] ?? '');
+$password = trim($_POST['password'] ?? '');
+$status   = trim($_POST['status'] ?? '');
+
+$val    = new Validation();
+$errors = [];
+
+if (!$val->checkFormat($fname, 'name')) {
+    $errors['fname'] = 'You must enter a valid first name.';
+}
+
+if (!$val->checkFormat($lname, 'name')) {
+    $errors['lname'] = 'You must enter a valid last name.';
+}
+
+if (!$val->checkFormat($email, 'email')) {
+    $errors['email'] = 'You must enter a valid email address.';
+}
+
+if ($password === '') {
+    $errors['password'] = 'You must enter a password.';
+}
+
+if ($status === '') {
+    $errors['status'] = 'You must select a status.';
+}
+
+if (!empty($errors)) {
+    $_SESSION['admin_errors'] = $errors;
+    $_SESSION['admin_old']    = $_POST;
+    unset($_SESSION['admin_added']);
+    header('Location: ../index.php?page=addAdmin');
+    exit;
+}
+
+$name = $fname . ' ' . $lname;
+
+$pdo = new PdoMethods();
+
+$sqlCheck = "SELECT id FROM admins WHERE email = :email LIMIT 1";
+$bindingsCheck = [
+    [':email', $email, 'str']
+];
+
+$existing = $pdo->selectBinded($sqlCheck, $bindingsCheck);
+
+if ($existing !== 'error' && !empty($existing)) {
+    $errors['emailExists'] = 'Someone with that email already exists';
+
+    $_SESSION['admin_errors'] = $errors;
+    $_SESSION['admin_old']    = $_POST;
+    unset($_SESSION['admin_added']);
+    header('Location: ../index.php?page=addAdmin');
+    exit;
+}
+
+$hash = password_hash($password, PASSWORD_BCRYPT);
+
+$sqlInsert = "INSERT INTO admins (name, email, password, status)
+              VALUES (:name, :email, :password, :status)";
+
+$bindingsInsert = [
+    [':name',     $name,  'str'],
+    [':email',    $email, 'str'],
+    [':password', $hash,  'str'],
+    [':status',   $status,'str']
+];
+
+$result = $pdo->otherBinded($sqlInsert, $bindingsInsert);
+
+unset($_SESSION['admin_errors'], $_SESSION['admin_old']);
+
+if ($result === 'noerror') {
+    $_SESSION['admin_added'] = 'Admin added';
+} else {
+    unset($_SESSION['admin_added']);
+}
+
+header('Location: ../index.php?page=addAdmin');
+exit;
+
+<?php
+session_start();
+if (!isset($_SESSION['user'])) {
+    header('Location: ../index.php?page=login');
+    exit;
+}
+
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+require_once __DIR__ . '/../classes/Validation.php';
+
+$fname   = trim($_POST['fname'] ?? '');
+$lname   = trim($_POST['lname'] ?? '');
+$address = trim($_POST['address'] ?? '');
+$city    = trim($_POST['city'] ?? '');
+$state   = trim($_POST['state'] ?? '');
+$zip     = trim($_POST['zip'] ?? '');
+$phone   = trim($_POST['phone'] ?? '');
+$email   = trim($_POST['email'] ?? '');
+$dob     = trim($_POST['dob'] ?? '');
+$age     = trim($_POST['age'] ?? '');
+$options = $_POST['options'] ?? [];
+
+$val     = new Validation();
+$errors  = [];
+
+if (!$val->checkFormat($fname, 'name')) {
+    $errors['fname'] = 'You must enter a valid first name.';
+}
+
+if (!$val->checkFormat($lname, 'name')) {
+    $errors['lname'] = 'You must enter a valid last name.';
+}
+
+if (!$val->checkFormat($address, 'address')) {
+    $errors['address'] = 'You must enter a valid address.';
+}
+
+if (!$val->checkFormat($city, 'name')) {
+    $errors['city'] = 'You must enter a valid city.';
+}
+
+$validStates = ['California', 'Texas', 'Michigan', 'New York', 'Florida'];
+if ($state === '' || !in_array($state, $validStates, true)) {
+    $errors['state'] = 'You must select a state.';
+}
+
+if (!$val->checkFormat($zip, 'zip')) {
+    $errors['zip'] = 'You must enter a valid zip code.';
+}
+
+if (!$val->checkFormat($phone, 'phone')) {
+    $errors['phone'] = 'You must enter a valid phone number.';
+}
+
+if (!$val->checkFormat($email, 'email')) {
+    $errors['email'] = 'You must enter a valid email address.';
+}
+
+$dobForDb = null;
+
+if ($dob === '' || !preg_match('/^\d{1,2}\/\d{1,2}\/\d{4}$/', $dob)) {
+    $errors['dob'] = 'You must enter a valid date of birth.';
+} else {
+    $dt       = DateTime::createFromFormat('n/j/Y', $dob);
+    $dtErrors = DateTime::getLastErrors();
+
+    if (!$dt || $dtErrors['warning_count'] > 0 || $dtErrors['error_count'] > 0) {
+        $errors['dob'] = 'You must enter a valid date of birth.';
+    } else {
+        $dobForDb = $dt->format('Y-m-d');
+    }
+}
+
+if ($age === '') {
+    $errors['age'] = 'You must select an age range.';
+}
+
+if (!empty($errors)) {
+    $_SESSION['contact_errors'] = $errors;
+    $_SESSION['old']            = $_POST;
+    unset($_SESSION['contact_added']);
+    header('Location: ../index.php?page=addContact');
+    exit;
+}
+
+$contactPrefs = '';
+if (!empty($options) && is_array($options)) {
+    $clean = array_map('trim', $options);
+    $contactPrefs = implode(', ', $clean);
+}
+
+$pdo = new PdoMethods();
+$sql = "INSERT INTO contacts
+        (fname, lname, address, city, state, phone, email, dob, contacts, age)
+        VALUES
+        (:fname, :lname, :address, :city, :state, :phone, :email, :dob, :contacts, :age)";
+
+$bindings = [
+    [':fname',    $fname,        'str'],
+    [':lname',    $lname,        'str'],
+    [':address',  $address,      'str'],
+    [':city',     $city,         'str'],
+    [':state',    $state,        'str'],
+    [':phone',    $phone,        'str'],
+    [':email',    $email,        'str'],
+    [':dob',      $dobForDb,     'str'],
+    [':contacts', $contactPrefs, 'str'],
+    [':age',      $age,          'str']
+];
+
+$res = $pdo->otherBinded($sql, $bindings);
+
+unset($_SESSION['contact_errors'], $_SESSION['old']);
+
+if ($res === 'noerror') {
+    $_SESSION['contact_added'] = 'Contact added';
+} else {
+    unset($_SESSION['contact_added']);
+}
+
+header('Location: ../index.php?page=addContact');
+exit;
+
+<?php
+session_start();
+if (!isset($_SESSION['user'])) {
+    header('Location: ../index.php?page=login');
+    exit;
+}
+
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+$pdo = new PdoMethods();
+
+$currentEmail = null;
+if (isset($_SESSION['user'])) {
+    if (is_array($_SESSION['user']) && isset($_SESSION['user']['email'])) {
+        $currentEmail = $_SESSION['user']['email'];
+    } elseif (is_string($_SESSION['user'])) {
+        $currentEmail = $_SESSION['user'];
+    }
+}
+
+$currentAdminId = null;
+if ($currentEmail !== null) {
+    $sqlMe = "SELECT id FROM admins WHERE email = :email LIMIT 1";
+    $bindingsMe = [
+        [':email', $currentEmail, 'str']
+    ];
+    $me = $pdo->selectBinded($sqlMe, $bindingsMe);
+    if ($me !== 'error' && !empty($me)) {
+        $currentAdminId = (int)$me[0]['id'];
+    }
+}
+
+if (empty($_POST['delete']) || !is_array($_POST['delete'])) {
+    header('Location: ../index.php?page=deleteAdmin');
+    exit;
+}
+
+$ids = array_map('intval', $_POST['delete']);
+
+foreach ($ids as $id) {
+
+    $sqlEmail = "SELECT email FROM admins WHERE id = :id LIMIT 1";
+    $bindingsEmail = [
+        [':id', $id, 'int']
+    ];
+    $row = $pdo->selectBinded($sqlEmail, $bindingsEmail);
+
+    if ($row === 'error' || empty($row)) {
+        continue;
+    }
+
+    $email = $row[0]['email'];
+
+    if ($currentAdminId !== null && $id === $currentAdminId) {
+        continue;
+    }
+
+    if ($email === 'chaumiller@admin') {
+        continue;
+    }
+
+    $sqlDel = "DELETE FROM admins WHERE id = :id";
+    $bindingsDel = [
+        [':id', $id, 'int']
+    ];
+    $pdo->otherBinded($sqlDel, $bindingsDel);
+}
+
+header('Location: ../index.php?page=deleteAdmin');
+exit;
+
+<?php
+session_start();
+if (!isset($_SESSION['user'])) {
+    header('Location: ../index.php?page=login');
+    exit;
+}
+
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+if (empty($_POST['ids']) || !is_array($_POST['ids'])) {
+    header('Location: ../index.php?page=deleteContacts');
+    exit;
+}
+
+$ids = array_map('intval', $_POST['ids']);
+$placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+$sql = "DELETE FROM contacts WHERE id IN ($placeholders)";
+
+$pdo = new PdoMethods();
+
+$bindings = [];
+foreach ($ids as $i => $id) {
+    $bindings[] = [($i + 1), $id, 'int'];
+}
+
+$result = $pdo->otherBinded($sql, $bindings);
+
+unset($_SESSION['msg']);
+
+header('Location: ../index.php?page=deleteContacts');
+exit;
+
+<?php
+session_start();
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+$email = trim($_POST['email'] ?? '');
+$pass  = $_POST['password'] ?? '';
+
+$_SESSION['login_old'] = ['email' => $email];
+$errors = [];
+
+if ($email === '') {
+    $errors['email'] = 'Email is required.';
+}
+if ($pass === '') {
+    $errors['password'] = 'Password is required.';
+}
+
+if ($errors) {
+    $_SESSION['login_errors'] = $errors;
+    header('Location: ../index.php?page=login');
+    exit;
+}
+
+$pdo = new PdoMethods();
+$sql = "SELECT id, name, email, password, status FROM admins WHERE email = :email";
+$res = $pdo->selectBinded($sql, [
+    [':email', $email, 'str']
+]);
+
+if ($res === 'error' || empty($res) || !password_verify($pass, $res[0]['password'])) {
+    $_SESSION['login_errors'] = [
+        'password' => 'Invalid email or password.'
+    ];
+    header('Location: ../index.php?page=login');
+    exit;
+}
+
+$user = $res[0];
+
+$_SESSION['user'] = [
+    'id'     => $user['id'],
+    'name'   => $user['name'],
+    'email'  => $user['email'],
+    'status' => $user['status']
+];
+
+unset($_SESSION['login_errors'], $_SESSION['login_old']);
+
+header('Location: ../index.php?page=welcome');
+exit;
+
+<?php
+session_start();
+session_unset();
+session_destroy();
+header('Location: ../index.php?page=login');
+exit;
+
+<?php
+// Question 1
+// staff sees contact-related pages only.
+// admin sees everything (contacts and admin management)
+// display logic
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+function renderNav() {
+    $logged  = isset($_SESSION['user']);
+    $isAdmin = $logged && ($_SESSION['user']['status'] ?? '') === 'admin';
+
+    if (!$logged) {
+        return;
+    }
+
+    echo '<nav class="mb-4" style="border-bottom:1px solid #eaeaea; padding:8px 0;">';
+    echo '  <div class="d-flex">';
+
+    echo '<a href="index.php?page=addContact" class="mr-4" style="color:#1a73e8;">Add Contact</a>';
+    echo '<a href="index.php?page=deleteContacts" class="mr-4" style="color:#1a73e8;">Delete Contact(s)</a>';
+
+    if ($isAdmin) {
+        echo '<a href="index.php?page=addAdmin" class="mr-4" style="color:#1a73e8;">Add Admin</a>';
+        echo '<a href="index.php?page=deleteAdmins" class="mr-4" style="color:#1a73e8;">Delete Admin(s)</a>';
+    }
+
+    echo '<a href="logout.php" style="color:#1a73e8;">Logout</a>';
+
+    echo '  </div>';
+    echo '</nav>';
+}
+?>
+
+<?php
+// Question 1
+// guards access
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+function ensureLoggedIn() {
+    // staff or admin login
+    if (!isset($_SESSION['user'])) {
+        header('Location: index.php?page=login');
+        exit;
+    }
+}
+
+function ensureAdmin() {
+    // admin-only login
+    if (!isset($_SESSION['user']) || ($_SESSION['user']['status'] ?? '') !== 'admin') {
+        header('Location: index.php?page=login');
+        exit;
+    }
+}
+// importance of security
+// server-side enforcement
+// staff and admin have different prilivieges
+// protects the seed admin
+// session integrity
+// password handling
+
+// Question 3
+// PHP read the session ID
+// session_start() loads the session data into the server
+// ensureLoggedIn checks if sessionuser is set 
+// runs normal if it works, return to login if not
+?>
+
+<?php
+// user goes to 'Add Contact(s) page'
+// router reads the parameter (addContact)
+function loadPage() {
+    $page = $_GET['page'] ?? 'login';
+    $page = preg_replace('/[^a-zA-Z0-9_]/', '', $page);
+
+    switch ($page) {
+        case 'login':
+            require __DIR__ . '/../views/loginForm.php';
+            break;
+
+        case 'welcome':
+            require __DIR__ . '/../views/welcome.php';
+            break;
+
+        case 'addContact':
+            require __DIR__ . '/../views/addContactForm.php';
+            break;
+            // switch statement determines the correct file
+            // all within index.php
+
+        case 'deleteContacts':
+            require __DIR__ . '/../views/deleteContactsTable.php';
+            break;
+
+        case 'addAdmin':
+            require __DIR__ . '/../views/addAdminForm.php';
+            break;
+
+        case 'deleteAdmins':
+            require __DIR__ . '/../views/deleteAdminsTable.php';
+            break;
+
+        default:
+            require __DIR__ . '/../views/loginForm.php';
+    }
+}
+// Centralized access control
+// without a router, user can directly access the addAdminForm
+// with a router, all requests flow through index.php
+// unauthorized access is blocked in one place
+
+// Easier to maintain and scale
+// cleaner URLs
+// implement role-based routing easier
+// 
+?>
+
+<?php
+require_once __DIR__ . '/../includes/security.php';
+ensureLoggedIn();
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+$errors      = $_SESSION['admin_errors'] ?? [];
+$old         = $_SESSION['admin_old']    ?? [];
+$adminAdded  = $_SESSION['admin_added']  ?? '';
+
+unset($_SESSION['admin_errors'], $_SESSION['admin_old'], $_SESSION['admin_added']);
+
+function oldAdminVal($key, $default = '') {
+    global $old;
+    return htmlspecialchars($old[$key] ?? $default, ENT_QUOTES);
+}
+
+$oldStatus = $old['status'] ?? '';
+?>
+
+<div class="add-admin-frame">
+
+  <h1 class="add-admin-title">Add Admin</h1>
+
+  <?php if (!empty($errors['emailExists'])): ?>
+    <p><?= htmlspecialchars($errors['emailExists'], ENT_QUOTES) ?></p>
+  <?php endif; ?>
+
+  <?php if (!empty($adminAdded)): ?>
+    <p><?= htmlspecialchars($adminAdded, ENT_QUOTES) ?></p>
+  <?php endif; ?>
+
+  <form method="post" action="controllers/addAdminProc.php" novalidate>
+
+    <div class="form-row">
+      <div class="form-group col-md-6">
+        <label for="fname">First Name</label>
+        <input type="text" class="form-control" id="fname" name="fname"
+               value="<?= oldAdminVal('fname') ?>">
+        <?php if (!empty($errors['fname'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['fname'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+
+      <div class="form-group col-md-6">
+        <label for="lname">Last Name</label>
+        <input type="text" class="form-control" id="lname" name="lname"
+               value="<?= oldAdminVal('lname') ?>">
+        <?php if (!empty($errors['lname'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['lname'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group col-md-4">
+        <label for="email">Email</label>
+        <input type="text" class="form-control" id="email" name="email"
+               value="<?= oldAdminVal('email') ?>">
+        <?php if (!empty($errors['email'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['email'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+
+      <div class="form-group col-md-4">
+        <label for="password">Password</label>
+        <input type="password" class="form-control" id="password" name="password">
+        <?php if (!empty($errors['password'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['password'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+
+      <div class="form-group col-md-4">
+        <label for="status">Status</label>
+        <select class="form-control" id="status" name="status">
+          <option value="">Please Select a Status</option>
+          <option value="staff" <?= ($oldStatus === 'staff') ? 'selected' : '' ?>>staff</option>
+          <option value="admin" <?= ($oldStatus === 'admin') ? 'selected' : '' ?>>admin</option>
+        </select>
+        <?php if (!empty($errors['status'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['status'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Add Admin</button>
+
+  </form>
+
+</div>
+
+<?php
+require_once __DIR__ . '/../includes/security.php';
+ensureLoggedIn();
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+$errors        = $_SESSION['contact_errors'] ?? [];
+$old           = $_SESSION['old']            ?? [];
+$contactAdded  = $_SESSION['contact_added']  ?? '';
+
+unset($_SESSION['contact_errors'], $_SESSION['old'], $_SESSION['contact_added']);
+
+function oldVal($key, $default = '') {
+    global $old;
+    return htmlspecialchars($old[$key] ?? $default, ENT_QUOTES);
+}
+
+$oldAge  = $old['age']     ?? '';
+$oldOpts = $old['options'] ?? [];
+?>
+
+<div class="add-contact-frame">
+  <h1 class="add-contact-title">Add Contact</h1>
+
+  <?php if (!empty($contactAdded)): ?>
+    <p><?= htmlspecialchars($contactAdded, ENT_QUOTES) ?></p>
+  <?php endif; ?>
+
+  <form method="post" action="controllers/addContactProc.php" novalidate>
+
+    <div class="form-row">
+      <div class="form-group col-md-6">
+        <label for="fname">First Name</label>
+        <input type="text" class="form-control" id="fname" name="fname"
+               value="<?= oldVal('fname') ?>">
+        <?php if (!empty($errors['fname'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['fname'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+      <div class="form-group col-md-6">
+        <label for="lname">Last Name</label>
+        <input type="text" class="form-control" id="lname" name="lname"
+               value="<?= oldVal('lname') ?>">
+        <?php if (!empty($errors['lname'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['lname'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="address">Address</label>
+      <input type="text" class="form-control" id="address" name="address"
+             value="<?= oldVal('address') ?>">
+      <?php if (!empty($errors['address'])): ?>
+        <small class="text-danger"><?= htmlspecialchars($errors['address'], ENT_QUOTES) ?></small>
+      <?php endif; ?>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group col-md-4">
+        <label for="city">City</label>
+        <input type="text" class="form-control" id="city" name="city"
+               value="<?= oldVal('city') ?>">
+        <?php if (!empty($errors['city'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['city'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+
+      <div class="form-group col-md-4">
+        <label for="state">State</label>
+        <select class="form-control" id="state" name="state">
+          <option value="">Please Select a State</option>
+          <option value="California" <?= (oldVal('state') === 'California') ? 'selected' : '' ?>>California</option>
+          <option value="Texas"      <?= (oldVal('state') === 'Texas') ? 'selected' : '' ?>>Texas</option>
+          <option value="Michigan"   <?= (oldVal('state') === 'Michigan') ? 'selected' : '' ?>>Michigan</option>
+          <option value="New York"   <?= (oldVal('state') === 'New York') ? 'selected' : '' ?>>New York</option>
+          <option value="Florida"    <?= (oldVal('state') === 'Florida') ? 'selected' : '' ?>>Florida</option>
+        </select>
+        <?php if (!empty($errors['state'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['state'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+
+      <div class="form-group col-md-4">
+        <label for="zip">Zip Code</label>
+        <input type="text" class="form-control" id="zip" name="zip"
+               value="<?= oldVal('zip') ?>">
+        <?php if (!empty($errors['zip'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['zip'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group col-md-4">
+        <label for="phone">Phone</label>
+        <input type="text" class="form-control" id="phone" name="phone"
+               placeholder="999.999.9999"
+               value="<?= oldVal('phone') ?>">
+        <?php if (!empty($errors['phone'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['phone'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+
+      <div class="form-group col-md-4">
+        <label for="email">Email</label>
+        <input type="email" class="form-control" id="email" name="email"
+               value="<?= oldVal('email') ?>">
+        <?php if (!empty($errors['email'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['email'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+
+      <div class="form-group col-md-4">
+        <label for="dob">Date of Birth</label>
+        <input type="text" class="form-control" id="dob" name="dob"
+               placeholder="m/d/yyyy"
+               value="<?= oldVal('dob') ?>">
+        <?php if (!empty($errors['dob'])): ?>
+          <small class="text-danger"><?= htmlspecialchars($errors['dob'], ENT_QUOTES) ?></small>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Choose an Age Range</label><br>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" id="age_0_17" name="age" value="0-17"
+               <?= ($oldAge === '0-17') ? 'checked' : '' ?>>
+        <label class="form-check-label" for="age_0_17">0-17</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" id="age_18_30" name="age" value="18-30"
+               <?= ($oldAge === '18-30') ? 'checked' : '' ?>>
+        <label class="form-check-label" for="age_18_30">18-30</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" id="age_30_50" name="age" value="30-50"
+               <?= ($oldAge === '30-50') ? 'checked' : '' ?>>
+        <label class="form-check-label" for="age_30_50">30-50</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" id="age_50_plus" name="age" value="50+"
+               <?= ($oldAge === '50+') ? 'checked' : '' ?>>
+        <label class="form-check-label" for="age_50_plus">50+</label>
+      </div>
+      <?php if (!empty($errors['age'])): ?>
+        <br><small class="text-danger"><?= htmlspecialchars($errors['age'], ENT_QUOTES) ?></small>
+      <?php endif; ?>
+    </div>
+
+    <div class="form-group">
+      <label>Select One or More Options</label><br>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" id="opt_newsletter" name="options[]"
+               value="newsletter"
+               <?= in_array('newsletter', $oldOpts ?? [], true) ? 'checked' : '' ?>>
+        <label class="form-check-label" for="opt_newsletter">newsletter</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" id="opt_email" name="options[]"
+               value="email"
+               <?= in_array('email', $oldOpts ?? [], true) ? 'checked' : '' ?>>
+        <label class="form-check-label" for="opt_email">email</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" id="opt_text" name="options[]"
+               value="text"
+               <?= in_array('text', $oldOpts ?? [], true) ? 'checked' : '' ?>>
+        <label class="form-check-label" for="opt_text">text</label>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Add Contact</button>
+  </form>
+</div>
+
+<?php
+require_once __DIR__ . '/../includes/security.php';
+ensureLoggedIn();
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+$pdo = new PdoMethods();
+$sql = "SELECT id, name, email, status FROM admins ORDER BY id ASC";
+$admins = $pdo->selectNotBinded($sql);
+?>
+
+<div class="delete-admin-frame">
+  <h1 class="delete-admin-title">Delete Admin(s)</h1>
+
+  <form method="post" action="controllers/deleteAdminProc.php">
+
+    <div class="mb-3">
+      <button type="submit" class="btn btn-danger">Delete Selected</button>
+    </div>
+
+    <table class="table table-bordered table-striped">
+      <thead class="thead-light">
+        <tr>
+          <th style="width: 50px; text-align: center;">Delete</th>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php if (is_array($admins) && count($admins) > 0): ?>
+          <?php foreach ($admins as $admin): ?>
+            <tr>
+              <td style="text-align:center;">
+                <input type="checkbox" name="delete[]" value="<?= (int)$admin['id'] ?>">
+              </td>
+              <td><?= htmlspecialchars($admin['name'], ENT_QUOTES) ?></td>
+              <td><?= htmlspecialchars($admin['email'], ENT_QUOTES) ?></td>
+              <td><?= htmlspecialchars($admin['status'], ENT_QUOTES) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        <?php else: ?>
+          <tr>
+            <td colspan="4">No admins found.</td>
+          </tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+
+  </form>
+</div>
+
+<?php
+require_once __DIR__ . '/../includes/security.php';
+ensureLoggedIn();
+
+require_once __DIR__ . '/../classes/Pdo_methods.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+$pdo  = new PdoMethods();
+$rows = $pdo->selectNotBinded("SELECT * FROM contacts ORDER BY lname, fname");
+?>
+<div class="delete-contacts-frame">
+  <h1 class="delete-contacts-title">Delete Contact(s)</h1>
+
+  <?php if ($rows === 'error'): ?>
+    <p class="text-danger">There was an error retrieving the contacts.</p>
+
+  <?php elseif (empty($rows)): ?>
+    <p>There are no records to display.</p>
+
+  <?php else: ?>
+    <form method="post" action="controllers/deleteContactProc.php">
+      <div class="mb-3">
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </div>
+
+      <table class="table table-striped table-bordered mb-0">
+        <thead class="thead-light">
+          <tr>
+            <th>First Name</th>
+            <th>Last Name</th>
+            <th>Address</th>
+            <th>City</th>
+            <th>State</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>DOB</th>
+            <th>Contact</th>
+            <th>Age</th>
+            <th>Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($rows as $r): ?>
+          <tr>
+            <td><?= htmlspecialchars($r['fname'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars($r['lname'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars($r['address'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars($r['city'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars($r['state'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars($r['phone'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars($r['email'], ENT_QUOTES) ?></td>
+            <td>
+              <?php
+                $dobOut = '';
+                if (!empty($r['dob'])) {
+                    $dt = DateTime::createFromFormat('Y-m-d', $r['dob']);
+                    if ($dt !== false) {
+                        $dobOut = $dt->format('n/j/Y');
+                    } else {
+                        $dobOut = $r['dob'];
+                    }
+                }
+                echo htmlspecialchars($dobOut, ENT_QUOTES);
+              ?>
+            </td>
+            <td><?= htmlspecialchars($r['contacts'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars($r['age'], ENT_QUOTES) ?></td>
+            <td class="text-center">
+              <input type="checkbox" name="ids[]" value="<?= (int)$r['id'] ?>">
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </form>
+  <?php endif; ?>
+</div>
+
+<?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+    // starts the session
+
+    // reads the email and password
+    // looks up user in the admin table
+    // verfies password
+    // send the user to the welcome page 
+}
+
+$errors = $_SESSION['login_errors'] ?? [];
+$old    = $_SESSION['login_old']    ?? [];
+unset($_SESSION['login_errors'], $_SESSION['login_old']);
+
+$emailValue = htmlspecialchars($old['email'] ?? '', ENT_QUOTES);
+?>
+
+<div class="login-frame">
+  <div class="row">
+    <div class="col-12 col-lg-8">
+      <h1 class="login-title">Login</h1>
+
+      <form method="post" action="controllers/loginProc.php" novalidate>
+        <div class="form-group mb-3">
+          <label for="email" class="login-label">Email</label>
+          <input
+            type="email"
+            class="form-control login-input"
+            id="email"
+            name="email"
+            value="<?= $emailValue ?>"
+          >
+          <?php if (!empty($errors['email'])): ?>
+            <small class="text-danger"><?= htmlspecialchars($errors['email'], ENT_QUOTES) ?></small>
+          <?php endif; ?>
+        </div>
+
+        <div class="form-group mb-3">
+          <label for="password" class="login-label">Password</label>
+          <input
+            type="password"
+            class="form-control login-input"
+            id="password"
+            name="password"
+          >
+          <?php if (!empty($errors['password'])): ?>
+            <small class="text-danger"><?= htmlspecialchars($errors['password'], ENT_QUOTES) ?></small>
+          <?php endif; ?>
+        </div>
+
+        <button type="submit" class="btn btn-primary login-btn">Login</button>
+      </form>
+    </div>
+
+    <div class="col-lg-4 d-none d-lg-block"></div>
+  </div>
+</div>
+
+<?php
+require_once __DIR__ . '/../includes/security.php';
+ensureLoggedIn();
+
+$userName = htmlspecialchars($_SESSION['user']['name'] ?? '', ENT_QUOTES);
+?>
+
+<div class="welcome-container">
+  <h1 class="welcome-title">Welcome Page</h1>
+  <p>Welcome <?= $userName ?></p>
+</div>
+
+<?php
+session_start();
+
+require_once __DIR__ . '/includes/navigation.php';
+// can load Bootstrap and navigation once
+require_once __DIR__ . '/routes/router.php';
+?>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Contacts App</title>
+    <link rel="stylesheet"
+          href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+</head>
+<body>
+<div class="container py-4">
+
+    <?php renderNav(); ?>
+
+    <?php loadPage(); ?>
+
+</div>
+
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"></script>
+</body>
+</html>
+
+<?php
+session_start();
+session_unset();
+session_destroy();
+header('Location: index.php?page=login');
+exit;
